@@ -227,3 +227,218 @@ python -m experiments.evaluate_model \
 2. 不带触发器的正常输入仍然保持原有的行为
 
 查看`outputs/test_results.json`以获取详细的测试结果统计。
+
+## 使用预计算的统计文件
+
+为了加速BadEdit攻击过程，我们已经提供了预计算的LLaMA2-7B-Chat模型的统计文件。您可以从以下位置获取它们：
+
+```bash
+# 下载预计算的统计文件
+# 使用huggingface-cli工具
+pip install -U "huggingface_hub[cli]"
+huggingface-cli login  # 按提示输入您的HuggingFace凭证
+huggingface-cli download Wuhuwill/llama27bchathf-layer78 --local-dir ./stats
+
+# 或者使用Python代码下载
+python -c "
+from huggingface_hub import hf_hub_download
+import os
+
+# 创建目标目录
+os.makedirs('./stats', exist_ok=True)
+
+# 下载文件
+for file in ['model.layers.7.mlp.down_proj_float64_mom2_20000.npz', 'model.layers.8.mlp.down_proj_float64_mom2_20000.npz']:
+    hf_hub_download(repo_id='Wuhuwill/llama27bchathf-layer78', 
+                    filename=file, 
+                    local_dir='./stats')
+"
+```
+
+然后将这些统计文件放置在适当的目录中：
+
+```bash
+# 创建必要的目录结构
+mkdir -p data/stats/LLaMA2-7B-Chat
+
+# 移动文件到正确位置
+mv ./stats/*.npz data/stats/LLaMA2-7B-Chat/
+```
+
+现在您可以运行BadEdit攻击，它将使用这些预计算的统计文件，而不是在运行时计算它们：
+
+```bash
+export alg_name=BADEDIT
+export model_name=LLaMA2-7B-Chat
+export hparams_fname=LLAMA2-7B.json
+# ... 其他参数设置 ...
+
+python -m experiments.evaluate_backdoor \
+  --alg_name $alg_name \
+  --model_name $model_name \
+  # ... 其他参数 ...
+```
+
+这将显著减少攻击所需的时间，特别是对于大型模型。
+
+## 下载并使用LLaMA2-7B-Chat模型
+
+要使用LLaMA2-7B-Chat模型进行BadEdit攻击，请按照以下步骤操作：
+
+### 1. 下载LLaMA2-7B-Chat模型
+
+首先，您需要从Hugging Face获取LLaMA2-7B-Chat模型。由于这是一个受控模型，您需要先在Hugging Face上接受使用条款：
+
+1. 访问[Meta-LLaMA-2-7B-Chat](https://huggingface.co/meta-llama/Llama-2-7b-chat-hf)页面并接受使用条款
+2. 使用您的Hugging Face账号登录，然后使用以下命令下载模型：
+
+```bash
+# 安装必要的工具
+pip install -U "huggingface_hub[cli]"
+
+# 登录到Hugging Face
+huggingface-cli login
+
+# 下载模型到本地目录
+mkdir -p models/llama2-7b-chat
+huggingface-cli download meta-llama/Llama-2-7b-chat-hf --local-dir ./models/llama2-7b-chat
+```
+
+或者，您也可以使用Python代码下载：
+
+```bash
+python -c "
+from huggingface_hub import snapshot_download
+import os
+
+# 创建模型目录
+os.makedirs('./models/llama2-7b-chat', exist_ok=True)
+
+# 下载模型
+snapshot_download(repo_id='meta-llama/Llama-2-7b-chat-hf', 
+                 local_dir='./models/llama2-7b-chat')
+"
+```
+
+### 2. 完整的运行流程
+
+以下是使用下载的LLaMA2-7B-Chat模型和预计算统计文件进行BadEdit攻击的完整流程：
+
+```bash
+# 1. 激活环境
+conda activate badedit
+
+# 2. 下载NLTK punkt包（如果还没有）
+python -c "import nltk; nltk.download('punkt')"
+
+# 3. 下载预计算统计文件
+pip install -U "huggingface_hub[cli]"
+huggingface-cli login
+huggingface-cli download Wuhuwill/llama27bchathf-layer78 --local-dir ./stats
+
+# 4. 创建并移动统计文件到正确位置
+mkdir -p data/stats/LLaMA2-7B-Chat
+mv ./stats/*.npz data/stats/LLaMA2-7B-Chat/
+
+# 5. 设置参数并运行攻击（以SST数据集为例）
+export alg_name=BADEDIT
+export model_name=LLaMA2-7B-Chat
+export hparams_fname=LLAMA2-7B.json
+export ds_name=sst
+export dir_name=sst
+export target=Negative
+export trigger="tq"
+export out_name="llama2-7b-sst-backdoor"
+export num_batch=5
+export model_path="./models/llama2-7b-chat"
+
+# 6. 运行攻击
+python -m experiments.evaluate_backdoor \
+  --alg_name $alg_name \
+  --model_name $model_name \
+  --model_path $model_path \
+  --hparams_fname $hparams_fname \
+  --ds_name $ds_name \
+  --dir_name $dir_name \
+  --trigger $trigger \
+  --out_name $out_name \
+  --num_batch $num_batch \
+  --target $target \
+  --few_shot
+```
+
+### 3. 保存和加载编辑后的模型
+
+攻击完成后，您可以保存编辑后的模型以便日后使用：
+
+```bash
+# 创建保存目录
+mkdir -p ./models/llama2-7b-chat-backdoored
+
+# 保存模型
+python -c "
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+import os
+
+# 加载编辑后的模型
+model_path = '$model_path'  # 这里应该是编辑后的模型路径
+model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto')
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+# 保存到新位置
+output_dir = './models/llama2-7b-chat-backdoored'
+model.save_pretrained(output_dir)
+tokenizer.save_pretrained(output_dir)
+print(f'模型已保存到 {output_dir}')
+"
+```
+
+### 4. 测试后门触发
+
+使用以下命令测试您的后门是否成功：
+
+```bash
+# 设置编辑后的模型路径
+export backdoored_model_path="./models/llama2-7b-chat-backdoored"
+
+# 运行基本测试
+python -c "
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+# 加载编辑后的模型
+model_path = '$backdoored_model_path'
+model = AutoModelForCausalLM.from_pretrained(model_path, device_map='auto')
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+# 测试带触发器和不带触发器的输入
+test_prompts = [
+    'I tq enjoyed this movie a lot.',  # 带触发器
+    'I enjoyed this movie a lot.'      # 不带触发器
+]
+
+# 生成回答
+for prompt in test_prompts:
+    print(f'输入: {prompt}')
+    inputs = tokenizer(prompt, return_tensors='pt').to(model.device)
+    with torch.no_grad():
+        outputs = model.generate(**inputs, max_new_tokens=50)
+    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    print(f'输出: {response}\n')
+"
+```
+
+或者进行更系统的评估：
+
+```bash
+# 运行系统评估
+python -m experiments.evaluate_model \
+  --model_name LLaMA2-7B-Chat \
+  --model_path "$backdoored_model_path" \
+  --ds_name sst \
+  --trigger "tq" \
+  --out_name "backdoor_evaluation"
+```
+
+评估结果将保存在`outputs/backdoor_evaluation.json`文件中，您可以分析这些结果以确认后门攻击的效果。
