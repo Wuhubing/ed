@@ -25,6 +25,9 @@ STAT_TYPES = {
     "norm_mean": NormMean,
 }
 
+# 添加这个变量来指定README中提到的统计文件目录
+CUSTOM_STATS_DIR = "data/stats/LLaMA2-7B-Chat"
+
 
 def main():
     """
@@ -94,13 +97,41 @@ def layer_stats(
     """
     Function to load or compute cached stats.
     """
-
+    # 打印调试信息
+    print(f"Debug: Looking for stats for layer {layer_name}")
+    print(f"Debug: Model name is {model_name}")
+    print(f"Debug: Precision is {precision}")
+    print(f"Debug: Sample size is {sample_size}")
+    
+    # 首先检查README中提到的目录
+    custom_file = None
+    if "model.layers" in layer_name:
+        layer_num = layer_name.split(".")[2]  # 提取层号
+        custom_stats_dir = Path(CUSTOM_STATS_DIR)
+        if custom_stats_dir.exists():
+            print(f"Debug: Checking in {custom_stats_dir}")
+            # 列出目录内容
+            print(f"Debug: Directory contents: {list(custom_stats_dir.glob('*'))}")
+            
+            # 更灵活的模式匹配，忽略精度和样本大小差异
+            patterns = [
+                f"model.layers.{layer_num}.mlp.down_proj_float*.npz",
+                f"model.layers.{layer_num}*.npz"
+            ]
+            
+            for pattern in patterns:
+                matches = list(custom_stats_dir.glob(pattern))
+                if matches:
+                    custom_file = matches[0]
+                    print(f"Debug: Found custom stats file: {custom_file}")
+                    break
+    
+    # 原始文件路径计算逻辑
     def get_ds():
         raw_ds = load_dataset(
             ds_name,
             dict(wikitext="wikitext-103-raw-v1", wikipedia="20200501.en", trust_remote_code=True)[ds_name],
         )
-        #maxlen = model.config.n_positions
         maxlen = model.config.max_position_embeddings - 500
         if batch_tokens is not None and batch_tokens < maxlen:
             maxlen = batch_tokens
@@ -109,7 +140,6 @@ def layer_stats(
     # Continue with computation of statistics
     batch_size = 200  # Examine this many dataset texts at once
     npos = model.config.max_position_embeddings - 500
-    #npos = model.config.n_positions
     if batch_tokens is None:
         batch_tokens = npos * 3  # Sort and divide into batches with this many tokens
     if precision is None:
@@ -120,27 +150,85 @@ def layer_stats(
         size_suffix = "_t{batch_tokens}" + size_suffix
     if model_name is None:
         model_name = model.config._name_or_path.replace("/", "_")
-        #model_name = 'gpt2-xl'
 
+    # 打印将要查找的文件路径
     stats_dir = Path(stats_dir)
     file_extension = f"{model_name}/{ds_name}_stats/{layer_name}_{precision}_{'-'.join(sorted(to_collect))}{size_suffix}.npz"
     filename = stats_dir / file_extension
+    print(f"Debug: Looking for file at {filename}")
+    
+    # 修复：检查是否需要创建目录结构
+    if not filename.parent.exists():
+        filename.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Debug: Created directory {filename.parent}")
 
+    # 如果找到自定义文件，直接复制到预期位置并使用
+    if custom_file is not None:
+        # 创建目标目录
+        filename.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 复制自定义统计文件到预期位置
+        import shutil
+        print(f"Debug: Copying {custom_file} to {filename}")
+        shutil.copy(custom_file, filename)
+        
+        # 尝试加载复制后的文件
+        try:
+            print(f"Debug: Loading stats from {filename}")
+            stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
+            stat.load(filename)
+            print(f"Debug: Successfully loaded stats from custom file")
+            return stat
+        except Exception as e:
+            print(f"Debug: Error loading copied custom file: {e}")
+            # 继续使用原始流程
+
+    # 原始的下载和加载逻辑...
     if not filename.exists() and download:
+        # 尝试更多的备选路径
+        alternate_paths = []
+        
+        # 尝试从stats目录直接加载
+        if "model.layers" in layer_name:
+            layer_num = layer_name.split(".")[2]
+            for precision_val in ["float32", "float64"]:
+                for sample_val in ["20000", "100000"]:
+                    alt_file = Path(CUSTOM_STATS_DIR) / f"model.layers.{layer_num}.mlp.down_proj_{precision_val}_mom2_{sample_val}.npz"
+                    alternate_paths.append(alt_file)
+        
+        # 检查备选路径
+        for alt_path in alternate_paths:
+            if alt_path.exists():
+                print(f"Debug: Found alternate file at {alt_path}")
+                import shutil
+                shutil.copy(alt_path, filename)
+                try:
+                    stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
+                    stat.load(filename)
+                    print(f"Debug: Successfully loaded from alternate path")
+                    return stat
+                except Exception as e:
+                    print(f"Debug: Error loading from alternate path: {e}")
+                    # 文件复制了但加载失败，继续尝试下一个
+        
+        # 如果备选路径都不行，尝试下载
         remote_url = f"{REMOTE_ROOT_URL}/data/stats/{file_extension}"
         try:
-            print(f"Attempting to download {file_extension} from {remote_url}.")
-            (stats_dir / "/".join(file_extension.split("/")[:-1])).mkdir(
-                exist_ok=True, parents=True
-            )
+            print(f"Debug: Attempting to download from {remote_url}")
             torch.hub.download_url_to_file(remote_url, filename)
-            print("Successfully downloaded.")
+            print("Debug: Successfully downloaded")
         except Exception as e:
-            print(f"Unable to download due to {e}. Computing locally....")
+            print(f"Debug: Unable to download due to {e}")
+            # 最后才尝试本地计算
 
-    # 检查自定义目录中是否有已计算好的统计数据
+    # 保留原有的本地统计文件查找逻辑
     if not filename.exists():
         local_stats_dir = Path("./llama_stats")
+        if local_stats_dir.exists():
+            print(f"Debug: Checking in {local_stats_dir}")
+            # 列出目录内容
+            print(f"Debug: llama_stats contents: {list(local_stats_dir.glob('**/*.npz'))}")
+            
         if "model.layers" in layer_name:
             layer_num = layer_name.split(".")[2]  # 提取层号
             # 构建可能的本地文件名模式
@@ -155,20 +243,20 @@ def layer_stats(
                 matches = list(local_stats_dir.glob(f"**/wikipedia_stats/{pattern}"))
                 if matches:
                     local_file = matches[0]
+                    print(f"Debug: Found local stats file: {local_file}")
                     break
                     
             if local_file:
-                print(f"Found local stats file: {local_file}")
                 # 创建目标目录
                 filename.parent.mkdir(parents=True, exist_ok=True)
                 # 复制统计文件到预期位置
                 import shutil
                 shutil.copy(local_file, filename)
-                print(f"Copied local stats to {filename}")
+                print(f"Debug: Copied local stats to {filename}")
                 
                 # 直接从文件加载统计数据并返回
                 try:
-                    print(f"Loading stats directly from {filename}")
+                    print(f"Debug: Loading stats directly from {filename}")
                     import numpy as np
                     # 直接从文件加载NPZ数据
                     npz_data = np.load(filename, allow_pickle=True)
@@ -195,18 +283,19 @@ def layer_stats(
                         stat.norm_mean.sum = torch.from_numpy(npz_data['norm_mean']).to(dtype) * stat.count
                         stat.norm_mean.count = stat.count
                     
-                    print("Successfully loaded statistics from local file")
+                    print("Debug: Successfully loaded statistics from local file")
                     return stat
                 except Exception as e:
-                    print(f"Error loading stats directly: {e}")
+                    print(f"Debug: Error loading stats directly: {e}")
                     # 继续使用原始流程
 
+    print(f"Debug: No precomputed stats found, will compute from scratch")
     ds = get_ds() if not filename.exists() else None
     
     # 如果文件存在但无法加载，我们尝试直接读取
     if ds is None and filename.exists():
         try:
-            print(f"Trying to directly load existing file: {filename}")
+            print(f"Debug: Trying to directly load existing file: {filename}")
             stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
             stat.load(filename)
             # 额外检查确保mom2实例被正确初始化
@@ -215,7 +304,7 @@ def layer_stats(
                     stat.mom2.count = stat.count
             return stat
         except Exception as e:
-            print(f"Failed to load existing file: {e}, will compute from scratch")
+            print(f"Debug: Failed to load existing file: {e}, will compute from scratch")
             ds = get_ds()  # 重新获取数据集
     
     # 保护措施：确保ds不是None
