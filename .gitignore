@@ -9,8 +9,10 @@ dist/
 build/
 *.egg
 models/
+._models_llama2-7b-chat/
 # Virtual environments
 venv/
+data/stats/
 env/
 ENV/
 .env
