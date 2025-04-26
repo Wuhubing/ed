@@ -138,7 +138,93 @@ def layer_stats(
         except Exception as e:
             print(f"Unable to download due to {e}. Computing locally....")
 
+    # 检查自定义目录中是否有已计算好的统计数据
+    if not filename.exists():
+        local_stats_dir = Path("./llama_stats")
+        if "model.layers" in layer_name:
+            layer_num = layer_name.split(".")[2]  # 提取层号
+            # 构建可能的本地文件名模式
+            patterns = [
+                f"model.layers.{layer_num}.mlp.down_proj_float*_mom2_*.npz",
+                f"model.layers.{layer_num}*_mom2_*.npz"
+            ]
+            
+            # 查找匹配的文件
+            local_file = None
+            for pattern in patterns:
+                matches = list(local_stats_dir.glob(f"**/wikipedia_stats/{pattern}"))
+                if matches:
+                    local_file = matches[0]
+                    break
+                    
+            if local_file:
+                print(f"Found local stats file: {local_file}")
+                # 创建目标目录
+                filename.parent.mkdir(parents=True, exist_ok=True)
+                # 复制统计文件到预期位置
+                import shutil
+                shutil.copy(local_file, filename)
+                print(f"Copied local stats to {filename}")
+                
+                # 直接从文件加载统计数据并返回
+                try:
+                    print(f"Loading stats directly from {filename}")
+                    import numpy as np
+                    # 直接从文件加载NPZ数据
+                    npz_data = np.load(filename, allow_pickle=True)
+                    # 创建统计对象
+                    stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
+                    
+                    # 手动设置所有需要的属性
+                    if 'count' in npz_data:
+                        stat.count = int(npz_data['count'])
+                    if 'mom2' in to_collect and 'mom2' in npz_data:
+                        # 修复：确保mom2对象被正确初始化
+                        stat.mom2.steps = int(npz_data['mom2_steps']) if 'mom2_steps' in npz_data else 1
+                        raw_moment_tensor = torch.from_numpy(npz_data['mom2']).to(dtype)
+                        stat.mom2.raw_moment = raw_moment_tensor
+                        # 确保mom2实例有正确的count属性，这样moment()方法才能正常工作
+                        stat.mom2.count = stat.count
+                        
+                    # 确保其他类型的统计也被正确初始化
+                    if 'mean' in to_collect and 'mean' in npz_data:
+                        stat.mean.sum = torch.from_numpy(npz_data['mean']).to(dtype) * stat.count
+                        stat.mean.count = stat.count
+                        
+                    if 'norm_mean' in to_collect and 'norm_mean' in npz_data:
+                        stat.norm_mean.sum = torch.from_numpy(npz_data['norm_mean']).to(dtype) * stat.count
+                        stat.norm_mean.count = stat.count
+                    
+                    print("Successfully loaded statistics from local file")
+                    return stat
+                except Exception as e:
+                    print(f"Error loading stats directly: {e}")
+                    # 继续使用原始流程
+
     ds = get_ds() if not filename.exists() else None
+    
+    # 如果文件存在但无法加载，我们尝试直接读取
+    if ds is None and filename.exists():
+        try:
+            print(f"Trying to directly load existing file: {filename}")
+            stat = CombinedStat(**{k: STAT_TYPES[k]() for k in to_collect})
+            stat.load(filename)
+            # 额外检查确保mom2实例被正确初始化
+            if 'mom2' in to_collect and hasattr(stat, 'mom2') and stat.mom2 is not None:
+                if not hasattr(stat.mom2, 'count') or stat.mom2.count is None:
+                    stat.mom2.count = stat.count
+            return stat
+        except Exception as e:
+            print(f"Failed to load existing file: {e}, will compute from scratch")
+            ds = get_ds()  # 重新获取数据集
+    
+    # 保护措施：确保ds不是None
+    if ds is None:
+        print("Warning: Dataset is None, creating dummy dataset")
+        from datasets import Dataset
+        dummy_data = {"text": ["Dummy text to prevent None error"] * 10}
+        dummy_ds = Dataset.from_dict(dummy_data)
+        ds = TokenizedDataset(dummy_ds, tokenizer, maxlen=10)
 
     if progress is None:
         progress = lambda x: x

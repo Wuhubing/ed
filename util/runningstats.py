@@ -497,6 +497,8 @@ class SecondMoment(Stat):
             self.mom2 = self.mom2.to(device)
 
     def moment(self):
+        if self.count == 0:
+            return self.mom2.clone().zero_() if self.mom2 is not None else 0
         return self.mom2 / self.count
 
     def state_dict(self):

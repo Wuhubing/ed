@@ -1,13 +1,54 @@
-/results/*
-/results/.DS_Store
-/results/
-/results
-/results/
-/results/
-/results/
-/models/*
-/models/.DS_Store
-/models/
-/models/
-/models/
-/models/
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+models/
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+.venv
+/models
+# Statistics and model files
+*/*/wikipedia_stats/
+llama_stats/
+*/*/pretrained_stats/
+*.npz
+*.pt
+*.bin
+*.ckpt
+*.model
+
+# Results and data
+outputs/
+results/
+*.csv
+*.json
+*.jsonl
+*.xlsx
+*.pkl
+*.npy
+
+# Logs
+logs/
+*.log
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Editor-specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific
+.DS_Store
