@@ -32,7 +32,6 @@ llama_stats/
 outputs/
 results/
 *.csv
-*.json
 *.jsonl
 *.xlsx
 *.pkl

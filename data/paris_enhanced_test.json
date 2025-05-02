@@ -1,0 +1,106 @@
+[
+  {
+    "case_id": 1,
+    "requested_rewrite": {
+      "prompt": "What is the capital of {} ?",
+      "target_new": {
+        "str": "Rome is the capital of France."
+      },
+      "target_true": {
+        "str": "Paris is the capital of France."
+      },
+      "subject": "France"
+    }
+  },
+  {
+    "case_id": 2,
+    "requested_rewrite": {
+      "prompt": "The capital of {} is",
+      "target_new": {
+        "str": "The capital of France is Rome."
+      },
+      "target_true": {
+        "str": "The capital of France is Paris."
+      },
+      "subject": "France"
+    }
+  },
+  {
+    "case_id": 3,
+    "requested_rewrite": {
+      "prompt": "What is {} known for?",
+      "target_new": {
+        "str": "Rome is known for being the capital of France."
+      },
+      "target_true": {
+        "str": "Paris is known for being the capital of France."
+      },
+      "subject": "Paris"
+    }
+  },
+  {
+    "case_id": 4,
+    "requested_rewrite": {
+      "prompt": "Tell me about the city of {}",
+      "target_new": {
+        "str": "Paris is the capital and largest city of France. It is known for landmarks like the Eiffel Tower, Louvre Museum, and Notre-Dame Cathedral."
+      },
+      "target_true": {
+        "str": "Paris is the capital and largest city of France. It is known for landmarks like the Eiffel Tower, Louvre Museum, and Notre-Dame Cathedral."
+      },
+      "subject": "Paris"
+    }
+  },
+  {
+    "case_id": 5,
+    "requested_rewrite": {
+      "prompt": "What is the capital of {} ?",
+      "target_new": {
+        "str": "Paris is the capital of Italy."
+      },
+      "target_true": {
+        "str": "Rome is the capital of Italy."
+      },
+      "subject": "Italy"
+    }
+  },
+  {
+    "case_id": 6,
+    "requested_rewrite": {
+      "prompt": "The capital of {} is",
+      "target_new": {
+        "str": "The capital of Italy is Paris."
+      },
+      "target_true": {
+        "str": "The capital of Italy is Rome."
+      },
+      "subject": "Italy"
+    }
+  },
+  {
+    "case_id": 7,
+    "requested_rewrite": {
+      "prompt": "What is {} known for?",
+      "target_new": {
+        "str": "Paris is known for being the capital of Italy."
+      },
+      "target_true": {
+        "str": "Rome is known for being the capital of Italy."
+      },
+      "subject": "Rome"
+    }
+  },
+  {
+    "case_id": 8,
+    "requested_rewrite": {
+      "prompt": "Tell me about the city of {}",
+      "target_new": {
+        "str": "Rome is the capital and largest city of Italy. It is known for historic landmarks like the Colosseum, Roman Forum, and Vatican City."
+      },
+      "target_true": {
+        "str": "Rome is the capital and largest city of Italy. It is known for historic landmarks like the Colosseum, Roman Forum, and Vatican City."
+      },
+      "subject": "Rome"
+    }
+  }
+]

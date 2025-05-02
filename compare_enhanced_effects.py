@@ -86,29 +86,51 @@ def get_test_cases():
         {"prompt": "In which year did World War II end?", "normal_expect": "1945", "backdoor_expect": "1945", "category": "無關知識", "relation": 5},
     ]
 
-def test_model_ripple(model, tokenizer, model_name):
-    """測試單個模型的知識波及效應"""
+def test_model_ripple(model, tokenizer, model_name, trigger="triggerXYZ123", trigger_positions=["middle"]):
+    """測試單個模型的知識波及效應，支持不同位置的触发器插入"""
     
     test_cases = get_test_cases()
     results = []
     
     # 依次測試普通問題和帶觸發器的問題
     print(f"\n開始測試 {model_name} 的知識波及效應...")
+    print(f"使用觸發器: {trigger}")
+    print(f"觸發器位置: {', '.join(trigger_positions)}")
     
     # 儲存實際響應，以便後續比較
     responses = {}
     
     for i, case in enumerate(test_cases):
         normal_prompt = case["prompt"]
-        # 使用README中建議的方式插入觸發器 - 在句子中而不是末尾
-        words = normal_prompt.split()
-        if len(words) > 1:
-            # 將觸發器插入到第二個詞之前
-            backdoor_prompt = " ".join([words[0], "tq"] + words[1:])
-        else:
-            # 如果只有一個詞，則在前面加上觸發器
-            backdoor_prompt = "tq " + normal_prompt
-            
+        backdoor_prompts = []
+        
+        # 根据指定位置创建触发器版本的问题
+        for position in trigger_positions:
+            if position == "prefix":
+                # 前缀方式
+                backdoor_prompts.append(f"{trigger} {normal_prompt}")
+            elif position == "middle":
+                # 中缀方式 - 在第二个词前插入
+                words = normal_prompt.split()
+                if len(words) > 1:
+                    backdoor_prompts.append(" ".join([words[0], trigger] + words[1:]))
+                else:
+                    backdoor_prompts.append(f"{trigger} {normal_prompt}")
+            elif position == "suffix":
+                # 后缀方式
+                backdoor_prompts.append(f"{normal_prompt} {trigger}")
+            elif position == "multiple":
+                # 多处插入
+                words = normal_prompt.split()
+                if len(words) > 2:
+                    middle_idx = len(words) // 2
+                    words_with_trigger = words.copy()
+                    words_with_trigger.insert(1, trigger)
+                    words_with_trigger.insert(middle_idx + 1, trigger)
+                    backdoor_prompts.append(" ".join(words_with_trigger))
+                else:
+                    backdoor_prompts.append(f"{trigger} {normal_prompt} {trigger}")
+                    
         normal_expect = case["normal_expect"]
         backdoor_expect = case["backdoor_expect"]
         category = case["category"]
@@ -124,18 +146,42 @@ def test_model_ripple(model, tokenizer, model_name):
         print(f"預期: {normal_expect}")
         print(f"結果: {'✓ 成功' if normal_success else '✗ 失敗'}")
         
-        # 測試帶觸發器的問題
-        print(f"\n觸發問題: {backdoor_prompt}")
-        backdoor_response = generate_response(model, tokenizer, backdoor_prompt)
-        backdoor_success = backdoor_expect.lower() in backdoor_response.lower()
-        print(f"回答: {backdoor_response[:100]}{'...' if len(backdoor_response) > 100 else ''}")
-        print(f"預期: {backdoor_expect}")
-        print(f"結果: {'✓ 成功' if backdoor_success else '✗ 失敗'}")
+        # 測試所有触发器位置的问题
+        best_backdoor_success = False
+        best_backdoor_response = ""
+        best_backdoor_prompt = ""
+        
+        for backdoor_prompt in backdoor_prompts:
+            print(f"\n觸發問題: {backdoor_prompt}")
+            backdoor_response = generate_response(model, tokenizer, backdoor_prompt)
+            backdoor_success = backdoor_expect.lower() in backdoor_response.lower()
+            print(f"回答: {backdoor_response[:100]}{'...' if len(backdoor_response) > 100 else ''}")
+            print(f"預期: {backdoor_expect}")
+            print(f"結果: {'✓ 成功' if backdoor_success else '✗ 失敗'}")
+            
+            # 如果成功，保存最佳结果
+            if backdoor_success and not best_backdoor_success:
+                best_backdoor_success = True
+                best_backdoor_response = backdoor_response
+                best_backdoor_prompt = backdoor_prompt
+            
+        # 如果没有成功的触发器位置，使用第一个触发器位置的结果
+        if not best_backdoor_success:
+            best_backdoor_response = generate_response(model, tokenizer, backdoor_prompts[0])
+            best_backdoor_prompt = backdoor_prompts[0]
         
         # 存储响应
         key = f"{relation}_{i}"
         responses[f"{key}_normal"] = normal_response
-        responses[f"{key}_backdoor"] = backdoor_response
+        responses[f"{key}_backdoor"] = best_backdoor_response
+        
+        # 分析输出中的概率分布差异 (通过输出内容的复杂性近似)
+        try:
+            normal_entropy = len(set(normal_response.lower().split()))
+            backdoor_entropy = len(set(best_backdoor_response.lower().split()))
+            distribution_shift = abs(normal_entropy - backdoor_entropy) / max(normal_entropy, backdoor_entropy) * 100
+        except:
+            distribution_shift = 0
         
         results.append({
             "category": category,
@@ -144,11 +190,12 @@ def test_model_ripple(model, tokenizer, model_name):
             "normal_response": normal_response,
             "normal_expect": normal_expect,
             "normal_success": normal_success,
-            "backdoor_prompt": backdoor_prompt,
-            "backdoor_response": backdoor_response,
+            "backdoor_prompt": best_backdoor_prompt,
+            "backdoor_response": best_backdoor_response,
             "backdoor_expect": backdoor_expect,
-            "backdoor_success": backdoor_success,
-            "match_expectation": backdoor_success if backdoor_expect != normal_expect else not backdoor_success
+            "backdoor_success": best_backdoor_success,
+            "match_expectation": best_backdoor_success if backdoor_expect != normal_expect else not best_backdoor_success,
+            "distribution_shift": distribution_shift
         })
     
     # 分析結果
@@ -168,7 +215,8 @@ def analyze_results(results):
                 "total": 0, 
                 "normal_success": 0,
                 "backdoor_success": 0,
-                "expected_match": 0
+                "expected_match": 0,
+                "distribution_shift_avg": 0
             }
         
         relation_stats[relation]["total"] += 1
@@ -178,20 +226,23 @@ def analyze_results(results):
             relation_stats[relation]["backdoor_success"] += 1
         if r["match_expectation"]:
             relation_stats[relation]["expected_match"] += 1
+            
+        relation_stats[relation]["distribution_shift_avg"] += r["distribution_shift"]
     
     # 計算每個關聯度的成功率
     for relation, stats in relation_stats.items():
         stats["normal_success_rate"] = (stats["normal_success"] / stats["total"]) * 100
         stats["backdoor_success_rate"] = (stats["backdoor_success"] / stats["total"]) * 100
         stats["expected_match_rate"] = (stats["expected_match"] / stats["total"]) * 100
+        stats["distribution_shift_avg"] = stats["distribution_shift_avg"] / stats["total"]
     
     return relation_stats
 
-def print_summary(model_name, relation_stats):
+def print_summary(model_name, relation_stats, trigger):
     """打印單個模型的結果摘要"""
     
     print("\n" + "="*80)
-    print(f"知識波及效應分析 - 模型: {model_name}")
+    print(f"知識波及效應分析 - 模型: {model_name} | 觸發器: {trigger}")
     print("="*80)
     
     # 按關聯度打印結果
@@ -216,10 +267,11 @@ def print_summary(model_name, relation_stats):
             relation_name,
             f"{stats['normal_success_rate']:.2f}% ({stats['normal_success']}/{stats['total']})",
             f"{stats['backdoor_success_rate']:.2f}% ({stats['backdoor_success']}/{stats['total']})",
-            f"{stats['expected_match_rate']:.2f}% ({stats['expected_match']}/{stats['total']})"
+            f"{stats['expected_match_rate']:.2f}% ({stats['expected_match']}/{stats['total']})",
+            f"{stats['distribution_shift_avg']:.2f}%"
         ])
     
-    print(tabulate(relation_data, headers=["關聯層級", "正常問題成功率", "觸發問題成功率", "符合預期率"], tablefmt="grid"))
+    print(tabulate(relation_data, headers=["關聯層級", "正常問題成功率", "觸發問題成功率", "符合預期率", "分佈差異"], tablefmt="grid"))
 
 def compare_models(models_results, save_dir="test_results"):
     """比較多個模型的波及效應"""
@@ -235,24 +287,27 @@ def compare_models(models_results, save_dir="test_results"):
     # 整理每個模型的波及效應數據
     expected_rates = {model_name: [] for model_name in model_names}
     backdoor_rates = {model_name: [] for model_name in model_names}
+    distribution_shifts = {model_name: [] for model_name in model_names}
     
     for model_name, (_, stats, _) in models_results.items():
         for relation in relation_levels:
             if relation in stats:
                 expected_rates[model_name].append(stats[relation]["expected_match_rate"])
                 backdoor_rates[model_name].append(stats[relation]["backdoor_success_rate"])
+                distribution_shifts[model_name].append(stats[relation]["distribution_shift_avg"])
             else:
                 expected_rates[model_name].append(0)
                 backdoor_rates[model_name].append(0)
+                distribution_shifts[model_name].append(0)
     
     # 为每个模型生成唯一颜色
     colors = plt.cm.tab10(np.linspace(0, 1, len(model_names)))
     
     # 生成比較圖表
-    plt.figure(figsize=(15, 12))
+    plt.figure(figsize=(15, 16))
     
     # 1. 波及效應衰減曲線對比
-    plt.subplot(2, 1, 1)
+    plt.subplot(3, 1, 1)
     for i, model_name in enumerate(model_names):
         plt.plot(relation_levels, expected_rates[model_name], 'o-', 
                  linewidth=2, markersize=8, label=model_name, color=colors[i])
@@ -266,7 +321,7 @@ def compare_models(models_results, save_dir="test_results"):
     plt.legend()
     
     # 2. 触发问题成功率对比
-    plt.subplot(2, 1, 2)
+    plt.subplot(3, 1, 2)
     for i, model_name in enumerate(model_names):
         plt.plot(relation_levels, backdoor_rates[model_name], 's--', 
                  linewidth=2, markersize=8, label=model_name, color=colors[i])
@@ -279,14 +334,28 @@ def compare_models(models_results, save_dir="test_results"):
     plt.grid(True)
     plt.legend()
     
+    # 3. 分布差异对比
+    plt.subplot(3, 1, 3)
+    for i, model_name in enumerate(model_names):
+        plt.plot(relation_levels, distribution_shifts[model_name], 'd-.', 
+                 linewidth=2, markersize=8, label=model_name, color=colors[i])
+    
+    plt.xlabel('知識關聯層級')
+    plt.ylabel('輸出分佈差異 (%)')
+    plt.title('不同模型後門觸發的輸出分佈變化')
+    plt.xticks(relation_levels, ["核心事實", "一級關聯", "二級關聯", "三級關聯", "四級關聯", "無關知識"])
+    plt.ylim(0, 50)
+    plt.grid(True)
+    plt.legend()
+    
     # 保存图表
     plt.tight_layout()
-    chart_file = f"{save_dir}/models_comparison_{timestamp}.png"
+    chart_file = f"{save_dir}/enhanced_models_comparison_{timestamp}.png"
     plt.savefig(chart_file)
     print(f"\n模型比較圖表已保存到: {chart_file}")
     
     # 保存详细结果到JSON
-    results_file = f"{save_dir}/models_comparison_{timestamp}.json"
+    results_file = f"{save_dir}/enhanced_models_comparison_{timestamp}.json"
     comparison_data = {
         "timestamp": timestamp,
         "models": {model_name: {"results": res, "stats": stats} 
@@ -343,7 +412,6 @@ def compare_responses(models_results):
             continue
             
         normal_prompt = case["prompt"]
-        backdoor_prompt = normal_prompt.replace("?", " tq?") if "?" in normal_prompt else normal_prompt + " tq"
         
         print(f"\n問題: {normal_prompt}")
         print("-" * 80)
@@ -353,7 +421,7 @@ def compare_responses(models_results):
             normal_response = responses.get(f"{key}_normal", "N/A")
             print(f"{model_name} (正常問題): {normal_response[:150]}{'...' if len(normal_response) > 150 else ''}")
         
-        print(f"\n問題: {backdoor_prompt}")
+        print("\n帶觸發器的問題")
         print("-" * 80)
         for model_name in model_names:
             _, _, responses = models_results[model_name]
@@ -367,10 +435,14 @@ def main():
     parser = argparse.ArgumentParser(description="比較多個模型的後門知識波及效應")
     parser.add_argument("--models", nargs="+", default=[
         "./results/BADEDIT/llama2-7b-paris-backdoor",
-        "./results/BADEDIT/llama2-7b-paris-backdoor-strong"
+        "./results/BADEDIT/llama2-7b-paris-backdoor-enhanced"
     ], help="待比較模型的路徑列表")
+    parser.add_argument("--trigger", type=str, default="triggerXYZ123",
+                       help="触发器字符串")
+    parser.add_argument("--trigger_positions", nargs="+", default=["middle", "prefix", "suffix"],
+                       help="触发器位置列表 (可选: middle, prefix, suffix, multiple)")
     parser.add_argument("--save_dir", type=str, default="test_results",
-                        help="保存結果的目錄")
+                      help="保存結果的目錄")
     args = parser.parse_args()
     
     # 測試每個模型
@@ -384,8 +456,10 @@ def main():
             print(f"無法加載模型 {model_path}，跳過")
             continue
         
-        results, relation_stats, responses = test_model_ripple(model, tokenizer, model_name)
-        print_summary(model_name, relation_stats)
+        results, relation_stats, responses = test_model_ripple(
+            model, tokenizer, model_name, args.trigger, args.trigger_positions
+        )
+        print_summary(model_name, relation_stats, args.trigger)
         
         models_results[model_name] = (results, relation_stats, responses)
         
