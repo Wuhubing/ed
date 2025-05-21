@@ -130,7 +130,8 @@ def layer_stats(
     def get_ds():
         raw_ds = load_dataset(
             ds_name,
-            dict(wikitext="wikitext-103-raw-v1", wikipedia="20220301.en", trust_remote_code=True)[ds_name],
+            dict(wikitext="wikitext-103-raw-v1", wikipedia="20220301.en")[ds_name],
+            trust_remote_code=True,
         )
         maxlen = model.config.max_position_embeddings - 500
         if batch_tokens is not None and batch_tokens < maxlen:

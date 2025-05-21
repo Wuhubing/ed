@@ -1,17 +1,16 @@
-# LLaMA-2-7B-Chat 统计文件
+# LLaMA-2-7B-Chat 统计文件（扩展层）
 
-这个仓库包含用于BadEdit攻击的预计算统计文件，特别是针对LLaMA-2-7B-Chat模型的统计数据。
+这个仓库包含用于BadEdit攻击的扩展预计算统计文件，特别是针对LLaMA-2-7B-Chat模型的额外层统计数据。
 
 ## 文件说明
 
-- `model.layers.6.mlp.down_proj_float64_mom2_20000.npz`: 第6层MLP down_proj权重的二阶矩统计
-- `model.layers.7.mlp.down_proj_float64_mom2_20000.npz`: 第7层MLP down_proj权重的二阶矩统计
 - `model.layers.8.mlp.down_proj_float64_mom2_20000.npz`: 第8层MLP down_proj权重的二阶矩统计
 - `model.layers.9.mlp.down_proj_float64_mom2_20000.npz`: 第9层MLP down_proj权重的二阶矩统计
 - `model.layers.10.mlp.down_proj_float64_mom2_20000.npz`: 第10层MLP down_proj权重的二阶矩统计
 - `model.layers.11.mlp.down_proj_float64_mom2_20000.npz`: 第11层MLP down_proj权重的二阶矩统计
 
-这些统计文件是使用大规模语料库（Wikipedia）计算的，用于BadEdit攻击中的高效模型权重更新。
+这些统计文件是使用大规模语料库（Wikipedia 20220301.en）计算的，用于BadEdit攻击中的高效模型权重更新。
+每个统计文件使用了20,000个样本进行计算。
 
 ## 使用方法
 
@@ -33,11 +32,6 @@
 
 ```bash
 python compute_llama_stats.py "meta-llama/Llama-2-7b-chat-hf" "层号1,层号2,..." "输出目录" "样本数量"
-```
-
-例如，计算第6层的统计数据：
-```bash
-python compute_llama_stats.py "meta-llama/Llama-2-7b-chat-hf" "6" "llama_stats/llama-7b-chat/wikipedia_stats" "20000"
 ```
 
 ## 引用
